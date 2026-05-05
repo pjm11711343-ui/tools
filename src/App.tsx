@@ -171,7 +171,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isAppNameModalOpen, setIsAppNameModalOpen] = useState(false);
 
-  const [adminPass, setAdminPass] = useState('0000');
+  const [adminPass, setAdminPass] = useState('4714');
   const [appName, setAppName] = useState('(주)명신기공');
   const [appSubName, setAppSubName] = useState('현장 공구 관리 시스템');
 
