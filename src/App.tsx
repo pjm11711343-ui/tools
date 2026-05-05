@@ -303,6 +303,7 @@ export default function App() {
   const [isDeleteRequestModalOpen, setIsDeleteRequestModalOpen] = useState(false);
   const [isAddNoticeModalOpen, setIsAddNoticeModalOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   
   const [activeTool, setActiveTool] = useState<Tool | null>(null);
   const [editingSite, setEditingSite] = useState<Site | null>(null);
@@ -1413,8 +1414,11 @@ export default function App() {
                       </div>
                       
                       {tool.imageUrl && (
-                        <div className="w-full h-28 mb-2 rounded border border-gray-50 bg-gray-50 flex items-center justify-center p-1">
-                          <img src={tool.imageUrl} alt={tool.name} className="w-full h-full object-contain" />
+                        <div 
+                          className="w-full h-28 mb-2 rounded border border-gray-50 bg-gray-50 flex items-center justify-center p-1 cursor-zoom-in"
+                          onClick={() => setZoomedImage(tool.imageUrl!)}
+                        >
+                          <img src={tool.imageUrl} alt={tool.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                         </div>
                       )}
                       
@@ -2635,6 +2639,37 @@ export default function App() {
           </motion.div>
         </div>
       )}
+      {/* Image Zoom Modal */}
+      <AnimatePresence>
+        {zoomedImage && (
+          <div 
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm cursor-zoom-out"
+            onClick={() => setZoomedImage(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="relative max-w-5xl max-h-[90vh] flex items-center justify-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <img 
+                src={zoomedImage} 
+                alt="Zoomed" 
+                className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl" 
+                referrerPolicy="no-referrer" 
+              />
+              <button 
+                onClick={() => setZoomedImage(null)}
+                className="absolute -top-4 -right-4 w-10 h-10 bg-white text-black rounded-full flex items-center justify-center shadow-xl hover:bg-gray-100 transition-colors z-10"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* App Share Center Modal */}
       {isShareModalOpen && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
