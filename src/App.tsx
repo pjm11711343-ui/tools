@@ -204,7 +204,7 @@ export default function App() {
         localHistory.forEach((h: TransferHistory) => batch.set(doc(historyRef, h.id), h));
 
         // Migrate Admin Pass
-        const localAdminPass = localStorage.getItem('admin_master_pass') || '0000';
+        const localAdminPass = localStorage.getItem('admin_master_pass') || '4714';
         batch.set(settingsRef, { masterPassword: localAdminPass });
         
         await batch.commit();
