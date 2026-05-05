@@ -1,0 +1,48 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isValidId(id) { return id is string && id.size() <= 128; }
+    
+    // Default deny
+    match /{document=**} {
+      allow read, write: if true; // Public access for simple syncing without Auth
+    }
+
+    // Tools validation
+    function isValidTool(data) {
+      return data.keys().hasAll(['id', 'name', 'serialNumber', 'category', 'currentSiteId', 'status', 'lastUpdated'])
+        && data.id is string
+        && data.name is string && data.name.size() > 0 && data.name.size() < 200
+        && data.serialNumber is string
+        && data.category is string
+        && data.status in ['available', 'in_transit', 'damaged', 'lost', 'disposed'];
+    }
+
+    match /tools/{toolId} {
+      allow read: if true;
+      allow create, update: if isValidId(toolId) && isValidTool(request.resource.data);
+      allow delete: if true;
+    }
+
+    // Sites validation
+    match /sites/{siteId} {
+      allow read, write: if true;
+    }
+
+    // History validation
+    match /history/{historyId} {
+      allow read, write: if true;
+    }
+    
+    // Admin settings
+    match /settings/admin {
+      allow read, write: if true;
+    }
+
+    // Notices
+    match /notices/{noticeId} {
+      allow read, write: if true;
+    }
+  }
+}

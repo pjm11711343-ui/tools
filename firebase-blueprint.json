@@ -1,0 +1,91 @@
+{
+  "entities": {
+    "Site": {
+      "title": "Site",
+      "description": "A construction site or location where tools are managed.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "password": { "type": "string", "description": "Access password for the site manager." }
+      },
+      "required": ["id", "name"]
+    },
+    "Tool": {
+      "title": "Tool",
+      "description": "An equipment asset tracked across sites.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "serialNumber": { "type": "string" },
+        "category": { "type": "string" },
+        "currentSiteId": { "type": "string" },
+        "status": { "type": "string", "enum": ["available", "in-use", "maintenance", "damaged"] },
+        "lastUpdated": { "type": "string", "format": "date-time" },
+        "unit": { "type": "string" },
+        "quantity": { "type": "integer" },
+        "imageUrl": { "type": "string", "format": "uri" }
+      },
+      "required": ["id", "name", "serialNumber", "category", "currentSiteId", "status", "lastUpdated"]
+    },
+    "TransferHistory": {
+      "title": "TransferHistory",
+      "description": "A record of a tool moving between sites or being introduced.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "toolId": { "type": "string" },
+        "toolName": { "type": "string" },
+        "fromSiteId": { "type": "string" },
+        "toSiteId": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["in", "out"] },
+        "notes": { "type": "string" },
+        "recordedBy": { "type": "string" }
+      },
+      "required": ["id", "toolId", "toolName", "toSiteId", "date", "type", "recordedBy"]
+    },
+    "Notice": {
+      "title": "Notice",
+      "description": "An announcement or message posted by administrators.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "author": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "important": { "type": "boolean" }
+      },
+      "required": ["id", "title", "content", "author", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/sites/{siteId}": {
+      "schema": "Site",
+      "description": "Collection of all sites."
+    },
+    "/tools/{toolId}": {
+      "schema": "Tool",
+      "description": "Collection of all tools managed in the system."
+    },
+    "/history/{historyId}": {
+      "schema": "TransferHistory",
+      "description": "Global log of all tool movements."
+    },
+    "/notices/{noticeId}": {
+      "schema": "Notice",
+      "description": "Collection of site-wide announcements."
+    },
+    "/settings/admin": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "masterPassword": { "type": "string" }
+        }
+      },
+      "description": "Global admin configuration."
+    }
+  }
+}
