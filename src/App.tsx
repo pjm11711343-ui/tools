@@ -971,6 +971,39 @@ export default function App() {
     e.target.value = ''; // Reset input
   };
 
+  const handleVerifyPassword = () => {
+    if (userRole === 'admin') {
+      if (passwordInput === adminPass) {
+        setIsVerified(true);
+        sessionStorage.setItem('is_verified', 'true');
+        setIsRoleModalOpen(false);
+        setPasswordInput('');
+        setPasswordError(false);
+        localStorage.setItem('user_role', 'admin');
+        setSelectedSiteId('all');
+      } else {
+        setPasswordError(true);
+      }
+    } else {
+      if (!userSiteId) {
+        alert('현장 담당자는 반드시 담당 현장을 지정해야 합니다.');
+        return;
+      }
+      const site = sites.find(s => s.id === userSiteId);
+      if (site && passwordInput === (site.password || '1111')) {
+        setIsVerified(true);
+        sessionStorage.setItem('is_verified', 'true');
+        setIsRoleModalOpen(false);
+        setPasswordInput('');
+        setPasswordError(false);
+        localStorage.setItem('user_role', 'manager');
+        localStorage.setItem('user_site_id', userSiteId);
+      } else {
+        setPasswordError(true);
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-100 text-[#141414] font-sans">
       {/* Sidebar / Site Navigation */}
@@ -2577,6 +2610,11 @@ export default function App() {
                     setPasswordInput(e.target.value);
                     setPasswordError(false);
                   }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleVerifyPassword();
+                    }
+                  }}
                   placeholder="비밀번호를 입력하세요"
                   className={`w-full bg-gray-50 border ${passwordError ? 'border-red-500 ring-2 ring-red-500/10' : 'border-gray-200'} rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all text-center tracking-[0.5em] font-bold`}
                 />
@@ -2588,38 +2626,7 @@ export default function App() {
 
             <div className="p-6 bg-gray-50">
               <button 
-                onClick={() => {
-                  if (userRole === 'admin') {
-                    if (passwordInput === adminPass) {
-                      setIsVerified(true);
-                      sessionStorage.setItem('is_verified', 'true');
-                      setIsRoleModalOpen(false);
-                      setPasswordInput('');
-                      setPasswordError(false);
-                      localStorage.setItem('user_role', 'admin');
-                      setSelectedSiteId('all');
-                    } else {
-                      setPasswordError(true);
-                    }
-                  } else {
-                    if (!userSiteId) {
-                      alert('현장 담당자는 반드시 담당 현장을 지정해야 합니다.');
-                      return;
-                    }
-                    const site = sites.find(s => s.id === userSiteId);
-                    if (site && passwordInput === (site.password || '1111')) {
-                      setIsVerified(true);
-                      sessionStorage.setItem('is_verified', 'true');
-                      setIsRoleModalOpen(false);
-                      setPasswordInput('');
-                      setPasswordError(false);
-                      localStorage.setItem('user_role', 'manager');
-                      localStorage.setItem('user_site_id', userSiteId);
-                    } else {
-                      setPasswordError(true);
-                    }
-                  }
-                }}
+                onClick={handleVerifyPassword}
                 className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold text-sm hover:bg-slate-800 shadow-xl transition-all"
               >
                 비밀번호 확인 및 접속
