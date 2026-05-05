@@ -99,11 +99,21 @@ export default function App() {
   const [notices, setNotices] = useState<Notice[]>([]);
   
   const [selectedSiteId, setSelectedSiteId] = useState<string>(() => {
-    if (typeof window === 'undefined') return INITIAL_SITES[0].id;
+    if (typeof window === 'undefined') return 'all';
     
     const urlParams = new URLSearchParams(window.location.search);
     const urlSiteId = urlParams.get('siteId');
     if (urlSiteId) return urlSiteId;
+
+    // Check role to determine default if no saved site
+    const urlRole = urlParams.get('role');
+    const role = (urlRole === 'admin' || urlRole === 'manager') 
+      ? urlRole 
+      : (localStorage.getItem('user_role') as any) || 'admin';
+
+    if (role === 'admin') {
+      return 'all'; // Admin defaults to "All Sites"
+    }
 
     const savedSiteId = localStorage.getItem('last_site_id');
     return savedSiteId || INITIAL_SITES[0].id;
@@ -2587,6 +2597,7 @@ export default function App() {
                       setPasswordInput('');
                       setPasswordError(false);
                       localStorage.setItem('user_role', 'admin');
+                      setSelectedSiteId('all');
                     } else {
                       setPasswordError(true);
                     }
