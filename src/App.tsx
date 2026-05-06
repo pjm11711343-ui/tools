@@ -248,7 +248,7 @@ export default function App() {
     const unsubSettings = onSnapshot(settingsRef, (snap) => {
       if (snap.exists()) {
         const data = snap.data();
-        setAdminPass(data.masterPassword || '0000');
+        setAdminPass(data.masterPassword || '4714');
         setAppName(data.appName || '(주)명신기공');
         setAppSubName(data.appSubName || '현장 공구 관리 시스템');
       }
@@ -2872,6 +2872,8 @@ export default function App() {
                 
                 setAdminPass(newPass);
                 localStorage.setItem('admin_master_pass', newPass);
+                // Sync new password to Firebase
+                syncToFirebase(tools, history, sites, newPass);
                 setIsAdminPassModalOpen(false);
                 alert('관리자 비밀번호가 성공적으로 변경되었습니다.');
               }}
