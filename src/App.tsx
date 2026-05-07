@@ -169,7 +169,6 @@ export default function App() {
   const [passwordError, setPasswordError] = useState(false);
   const [isAdminPassModalOpen, setIsAdminPassModalOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isAppNameModalOpen, setIsAppNameModalOpen] = useState(false);
 
   const [adminPass, setAdminPass] = useState('4714');
   const [appName, setAppName] = useState('(주)명신기공');
@@ -1025,8 +1024,12 @@ export default function App() {
         <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 text-white flex flex-col shadow-xl transition-transform duration-300 transform lg:relative lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
           <div className="p-6 border-b border-slate-800 flex justify-between items-center group/title">
             <div 
-              className={userRole === 'admin' ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}
-              onClick={() => userRole === 'admin' && setIsAppNameModalOpen(true)}
+              className="cursor-pointer hover:opacity-80 transition-opacity"
+              onClick={() => {
+                setView('inventory');
+                if (userRole === 'admin') setSelectedSiteId('all');
+                setIsSidebarOpen(false);
+              }}
             >
               <h1 className="text-lg font-bold tracking-tight">{appName}</h1>
               <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider font-semibold">{appSubName}</p>
@@ -2763,84 +2766,7 @@ export default function App() {
           </motion.div>
         </div>
       )}
-      {/* App Name Edit Modal */}
-      {isAppNameModalOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
-          <motion.div 
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden"
-          >
-            <div className="p-8 text-center border-b border-gray-100">
-              <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <Edit2 className="w-8 h-8 text-blue-600" />
-              </div>
-              <h3 className="text-xl font-bold text-gray-800">앱 이름 변경</h3>
-              <p className="text-sm text-gray-500 mt-2">시스템 상단에 표시될 이름을 설정하세요.</p>
-            </div>
-            
-            <form 
-              onSubmit={async (e) => {
-                e.preventDefault();
-                const formData = new FormData(e.currentTarget);
-                const newName = formData.get('newName') as string;
-                const newSubName = formData.get('newSubName') as string;
-                
-                try {
-                  setIsSyncing(true);
-                  await updateDoc(doc(db, 'settings', 'admin'), { 
-                    appName: newName,
-                    appSubName: newSubName
-                  });
-                  setIsAppNameModalOpen(false);
-                  alert('앱 이름이 성공적으로 변경되었습니다.');
-                } catch (e) {
-                  alert('변경에 실패했습니다.');
-                } finally {
-                  setIsSyncing(false);
-                }
-              }}
-              className="p-6 space-y-4"
-            >
-              <div>
-                <label className="block text-[10px] uppercase font-bold text-gray-500 mb-2">메인 타이틀 (예: 업체명)</label>
-                <input 
-                  name="newName"
-                  type="text"
-                  required
-                  defaultValue={appName}
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all font-bold"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] uppercase font-bold text-gray-500 mb-2">서브 타이틀 (예: 시스템명)</label>
-                <input 
-                  name="newSubName"
-                  type="text"
-                  required
-                  defaultValue={appSubName}
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all font-bold"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4 pt-2">
-                <button 
-                  type="button"
-                  onClick={() => setIsAppNameModalOpen(false)}
-                  className="py-4 border border-gray-200 rounded-2xl font-bold text-sm text-gray-600 hover:bg-gray-50 transition-colors"
-                >
-                  취소
-                </button>
-                <button 
-                  type="submit"
-                  className="py-4 bg-blue-600 text-white rounded-2xl font-bold text-sm hover:bg-blue-700 shadow-xl transition-all"
-                >
-                  변경 완료
-                </button>
-              </div>
-            </form>
-          </motion.div>
-        </div>
-      )}
+
 
       {/* Admin Password Edit Modal */}
       {isAdminPassModalOpen && (
