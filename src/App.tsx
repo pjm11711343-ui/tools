@@ -1277,7 +1277,7 @@ export default function App() {
             </div>
 
             <div className="flex gap-2 lg:gap-3">
-              {userRole === 'admin' && (
+              {(userRole === 'admin' || userRole === 'manager') && (
                 <button 
                   onClick={() => setIsAddModalOpen(true)}
                   className="p-2 lg:px-4 lg:py-2 bg-blue-600 text-white rounded-lg text-sm font-medium shadow-sm hover:bg-blue-700 transition-all flex items-center gap-2"
@@ -1774,7 +1774,7 @@ export default function App() {
                   formData.get('category') as string,
                   formData.get('unit') as string,
                   Number(formData.get('quantity')),
-                  formData.get('targetSiteId') as string,
+                  (userRole === 'manager' ? userSiteId : formData.get('targetSiteId')) as string,
                   previewImage || undefined,
                   formData.get('notes') as string
                 );
@@ -1875,9 +1875,9 @@ export default function App() {
                 </div>
               </div>
 
-              {userRole === 'admin' && (
+              {(userRole === 'admin' || userRole === 'manager') && (
                 <div>
-                  <label className="block text-[10px] uppercase font-bold text-gray-400 mb-1 underline decoration-blue-500/30 underline-offset-4">관리자 비고 (상세 메모)</label>
+                  <label className="block text-[10px] uppercase font-bold text-gray-400 mb-1 underline decoration-blue-500/30 underline-offset-4">상세 메모 (특이사항)</label>
                   <textarea 
                     name="notes" 
                     className="w-full bg-white border border-gray-200 rounded-xl p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all min-h-[60px] resize-none"
@@ -1892,8 +1892,9 @@ export default function App() {
                   <select 
                     name="targetSiteId" 
                     required
-                    defaultValue={selectedSiteId !== 'all' ? selectedSiteId : (sites[0]?.id || '')}
-                    className="w-full bg-white border border-gray-200 rounded-xl p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-bold"
+                    disabled={userRole === 'manager'}
+                    defaultValue={userRole === 'manager' ? (userSiteId || '') : (selectedSiteId !== 'all' ? selectedSiteId : (sites[0]?.id || ''))}
+                    className="w-full bg-white border border-gray-200 rounded-xl p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-bold disabled:opacity-60 disabled:bg-gray-50"
                   >
                     {sites.map(s => (
                       <option key={s.id} value={s.id}>{s.name}</option>
