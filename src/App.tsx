@@ -97,6 +97,15 @@ export default function App() {
   const [sites, setSites] = useState<Site[]>([]);
   const [requests, setRequests] = useState<ApprovalRequest[]>([]);
   const [notices, setNotices] = useState<Notice[]>([]);
+
+  // Categories & View Filter States
+  const [categories, setCategories] = useState<string[]>(CATEGORIES);
+  const [isCategoryManageModalOpen, setIsCategoryManageModalOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<{ oldName: string; newName: string } | null>(null);
+
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+  const [selectedToolNameFilter, setSelectedToolNameFilter] = useState<string>('all');
+  const [inventoryViewMode, setInventoryViewMode] = useState<'cards' | 'by_category' | 'by_tool_name'>('cards');
   
   const [selectedSiteId, setSelectedSiteId] = useState<string>(() => {
     if (typeof window === 'undefined') return 'all';
@@ -253,6 +262,16 @@ export default function App() {
       }
     });
 
+    const categoriesRef = doc(db, 'settings', 'categories');
+    const unsubCategories = onSnapshot(categoriesRef, (snap) => {
+      if (snap.exists() && snap.data()?.list && Array.isArray(snap.data().list)) {
+        setCategories(snap.data().list);
+      } else {
+        setCategories(CATEGORIES);
+        setDoc(categoriesRef, { list: CATEGORIES }).catch(console.error);
+      }
+    });
+
     setIsSyncing(false);
     setIsLoaded(true);
 
@@ -267,6 +286,7 @@ export default function App() {
       unsubRequests();
       unsubNotices();
       unsubSettings();
+      unsubCategories();
     };
   }, []);
 
@@ -309,14 +329,153 @@ export default function App() {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Filtered tools for the current site
+  // Category Management Handlers
+  const handleAddCategory = async (catName: string) => {
+    const trimmed = catName.trim();
+    if (!trimmed) {
+      alert('카테고리 명칭을 입력해주세요.');
+      return;
+    }
+    if (categories.includes(trimmed)) {
+      alert('이미 존재하는 카테고리 명칭입니다.');
+      return;
+    }
+    setIsSyncing(true);
+    try {
+      const updated = [...categories, trimmed];
+      setCategories(updated);
+      await setDoc(doc(db, 'settings', 'categories'), { list: updated });
+    } catch (e) {
+      console.error('Add category failed:', e);
+      alert('카테고리 추가 중 오류가 발생했습니다.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleEditCategory = async (oldName: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed) {
+      alert('변경할 카테고리 명칭을 입력해주세요.');
+      return;
+    }
+    if (oldName === trimmed) {
+      setEditingCategory(null);
+      return;
+    }
+    if (categories.includes(trimmed)) {
+      alert('이미 존재하는 카테고리 명칭입니다.');
+      return;
+    }
+    setIsSyncing(true);
+    try {
+      const updated = categories.map(c => c === oldName ? trimmed : c);
+      setCategories(updated);
+      await setDoc(doc(db, 'settings', 'categories'), { list: updated });
+
+      // Update all tools with the old category name
+      const toolsToUpdate = tools.filter(t => t.category === oldName);
+      if (toolsToUpdate.length > 0) {
+        const batch = writeBatch(db);
+        toolsToUpdate.forEach(t => {
+          batch.update(doc(db, 'tools', t.id), { category: trimmed });
+        });
+        await batch.commit();
+      }
+      setEditingCategory(null);
+    } catch (e) {
+      console.error('Edit category failed:', e);
+      alert('카테고리 수정 중 오류가 발생했습니다.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleDeleteCategory = async (catToDelete: string) => {
+    const count = tools.filter(t => t.category === catToDelete).length;
+    const msg = count > 0 
+      ? `'${catToDelete}' 카테고리를 삭제하시겠습니까?\n이 카테고리를 사용하는 ${count}개의 자산은 '미분류'로 변경됩니다.`
+      : `'${catToDelete}' 카테고리를 삭제하시겠습니까?`;
+    
+    if (!confirm(msg)) return;
+
+    setIsSyncing(true);
+    try {
+      const updated = categories.filter(c => c !== catToDelete);
+      setCategories(updated);
+      await setDoc(doc(db, 'settings', 'categories'), { list: updated });
+
+      // Reassign tools with that category to '미분류'
+      const toolsToUpdate = tools.filter(t => t.category === catToDelete);
+      if (toolsToUpdate.length > 0) {
+        const batch = writeBatch(db);
+        toolsToUpdate.forEach(t => {
+          batch.update(doc(db, 'tools', t.id), { category: '미분류' });
+        });
+        await batch.commit();
+      }
+    } catch (e) {
+      console.error('Delete category failed:', e);
+      alert('카테고리 삭제 중 오류가 발생했습니다.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Filtered tools for the current site, category, and tool name
   const siteTools = useMemo(() => {
     return tools.filter(tool => {
       const matchesSearch = (tool.name.toLowerCase().includes(searchQuery.toLowerCase()) || tool.serialNumber.toLowerCase().includes(searchQuery.toLowerCase()));
-      if (selectedSiteId === 'all') return matchesSearch;
-      return tool.currentSiteId === selectedSiteId && matchesSearch;
+      const matchesSite = selectedSiteId === 'all' || tool.currentSiteId === selectedSiteId;
+      const matchesCategory = selectedCategoryFilter === 'all' || tool.category === selectedCategoryFilter;
+      const matchesToolName = selectedToolNameFilter === 'all' || tool.name === selectedToolNameFilter;
+      return matchesSearch && matchesSite && matchesCategory && matchesToolName;
     });
-  }, [tools, selectedSiteId, searchQuery]);
+  }, [tools, selectedSiteId, searchQuery, selectedCategoryFilter, selectedToolNameFilter]);
+
+  // Distinct tool names present in dataset
+  const availableToolNames = useMemo(() => {
+    const names = Array.from(new Set(tools.map(t => t.name))).filter((n): n is string => Boolean(n));
+    return names.sort((a, b) => a.localeCompare(b));
+  }, [tools]);
+
+  // Grouped tools by category
+  const toolsByCategory = useMemo(() => {
+    const map: { [cat: string]: Tool[] } = {};
+    siteTools.forEach(tool => {
+      const cat = tool.category || '미분류';
+      if (!map[cat]) map[cat] = [];
+      map[cat].push(tool);
+    });
+    return map;
+  }, [siteTools]);
+
+  // Grouped tools by tool name
+  const toolsByNameGrouped = useMemo(() => {
+    const map: { [name: string]: { category: string; tools: Tool[]; totalQty: number; availableQty: number; damagedQty: number; sitesMap: { [siteName: string]: number } } } = {};
+    siteTools.forEach(tool => {
+      const name = tool.name;
+      if (!map[name]) {
+        map[name] = {
+          category: tool.category || '미분류',
+          tools: [],
+          totalQty: 0,
+          availableQty: 0,
+          damagedQty: 0,
+          sitesMap: {}
+        };
+      }
+      map[name].tools.push(tool);
+      const qty = tool.quantity || 1;
+      map[name].totalQty += qty;
+      if (tool.status === 'available') map[name].availableQty += qty;
+      if (tool.status === 'damaged') map[name].damagedQty += qty;
+
+      const sName = sites.find(s => s.id === tool.currentSiteId)?.name || '기타';
+      map[name].sitesMap[sName] = (map[name].sitesMap[sName] || 0) + qty;
+    });
+    return map;
+  }, [siteTools, sites]);
 
   const selectedSite = useMemo(() => {
     const found = sites.find(s => s.id === selectedSiteId);
@@ -1225,6 +1384,17 @@ export default function App() {
             </div>
             
             <button 
+              onClick={() => setIsCategoryManageModalOpen(true)}
+              className="w-full flex items-center justify-between p-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl transition-all border border-slate-700 text-xs font-bold text-slate-200"
+            >
+              <div className="flex items-center gap-2">
+                <Settings2 className="w-4 h-4 text-blue-400" />
+                <span>장비 카테고리 관리</span>
+              </div>
+              <span className="text-[10px] bg-slate-900 px-2 py-0.5 rounded-full text-slate-400 font-mono">{categories.length}</span>
+            </button>
+
+            <button 
               onClick={() => setIsRoleModalOpen(true)}
               className="w-full group flex items-center gap-3 p-3 bg-slate-800 hover:bg-slate-700 rounded-xl transition-all border border-slate-700"
             >
@@ -1365,21 +1535,118 @@ export default function App() {
             </div>
           </div>
 
-          <div className="px-4 lg:px-8 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 flex-shrink-0">
-            <div className="relative w-full sm:w-72">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input 
-                type="text" 
-                placeholder="공구 또는 S/N 검색..." 
-                className="w-full bg-white border border-gray-200 rounded-lg pl-10 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-bold"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
+          {view === 'inventory' ? (
+            <div className="px-4 lg:px-8 py-3 bg-white border-b border-gray-200 shadow-sm flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-3 flex-shrink-0">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Search */}
+                <div className="relative w-full sm:w-56">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                  <input 
+                    type="text" 
+                    placeholder="공구명 또는 S/N..." 
+                    className="w-full bg-gray-50 border border-gray-200 rounded-lg pl-9 pr-3 py-1.5 text-xs font-bold text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                </div>
+
+                {/* Category Filter */}
+                <div className="flex items-center gap-1">
+                  <select 
+                    value={selectedCategoryFilter}
+                    onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+                    className="bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  >
+                    <option value="all">전체 카테고리 ({categories.length})</option>
+                    {categories.map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                  <button 
+                    onClick={() => setIsCategoryManageModalOpen(true)}
+                    className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200/60 rounded-lg transition-colors text-xs font-bold flex items-center gap-1 shrink-0"
+                    title="카테고리 추가/수정/삭제"
+                  >
+                    <Settings2 className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline text-[11px]">카테고리 관리</span>
+                  </button>
+                </div>
+
+                {/* Tool Name Filter */}
+                <select 
+                  value={selectedToolNameFilter}
+                  onChange={(e) => setSelectedToolNameFilter(e.target.value)}
+                  className="bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                >
+                  <option value="all">전체 공구 명칭 ({availableToolNames.length})</option>
+                  {availableToolNames.map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+
+                {/* Reset Filters */}
+                {(selectedCategoryFilter !== 'all' || selectedToolNameFilter !== 'all' || searchQuery) && (
+                  <button 
+                    onClick={() => {
+                      setSelectedCategoryFilter('all');
+                      setSelectedToolNameFilter('all');
+                      setSearchQuery('');
+                    }}
+                    className="text-[11px] text-blue-600 hover:underline font-bold px-1"
+                  >
+                    필터 초기화
+                  </button>
+                )}
+              </div>
+
+              {/* View Mode Toggle */}
+              <div className="flex items-center justify-between sm:justify-end gap-3">
+                <span className="text-[10px] text-gray-400 font-bold">
+                  {siteTools.length}개 자산 선택됨
+                </span>
+
+                <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl border border-gray-200">
+                  <button 
+                    onClick={() => setInventoryViewMode('cards')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      inventoryViewMode === 'cards' 
+                        ? 'bg-white text-blue-600 shadow-sm' 
+                        : 'text-gray-500 hover:text-gray-800'
+                    }`}
+                  >
+                    <Box className="w-3.5 h-3.5" />
+                    <span>전체 리스트</span>
+                  </button>
+                  <button 
+                    onClick={() => setInventoryViewMode('by_category')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      inventoryViewMode === 'by_category' 
+                        ? 'bg-white text-blue-600 shadow-sm' 
+                        : 'text-gray-500 hover:text-gray-800'
+                    }`}
+                  >
+                    <Settings2 className="w-3.5 h-3.5" />
+                    <span>카테고리별</span>
+                  </button>
+                  <button 
+                    onClick={() => setInventoryViewMode('by_tool_name')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      inventoryViewMode === 'by_tool_name' 
+                        ? 'bg-white text-blue-600 shadow-sm' 
+                        : 'text-gray-500 hover:text-gray-800'
+                    }`}
+                  >
+                    <Hammer className="w-3.5 h-3.5" />
+                    <span>공구 명칭별</span>
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="text-[10px] lg:text-xs text-gray-500 font-medium">
-              표시됨: {view === 'inventory' ? siteTools.length : history.length} 항목
+          ) : (
+            <div className="px-4 lg:px-8 py-3 flex justify-between items-center text-xs text-gray-500 font-medium flex-shrink-0">
+              <span>검색 및 필터: 히스토리 기록 {history.length}건</span>
             </div>
-          </div>
+          )}
 
           {/* Content Area */}
           <div id="printable-content" className="flex-1 overflow-y-auto p-4 lg:p-8 pt-2">
@@ -1390,122 +1657,280 @@ export default function App() {
             <AnimatePresence mode="wait">
               {view === 'inventory' ? (
                 <motion.div 
-                  key="inventory"
+                  key={`inventory-${inventoryViewMode}`}
                   initial={{ opacity: 0, scale: 0.98 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.98 }}
-                  className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
+                  className="space-y-6"
                 >
-                  {siteTools.map((tool) => (
-                    <div 
-                      key={tool.id} 
-                      className="bg-white rounded-lg border border-gray-100 p-2.5 shadow-sm hover:shadow-md transition-all group flex flex-col h-full"
-                    >
-                      <div className="flex justify-between items-start mb-1.5">
-                        <div className="flex flex-col gap-0.5">
-                          <div className="px-1.5 py-0.5 bg-gray-100 text-gray-500 text-[8px] uppercase font-bold rounded self-start">
-                            {tool.category}
+                  {/* View Mode 1: Cards View */}
+                  {inventoryViewMode === 'cards' && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                      {siteTools.map((tool) => (
+                        <div 
+                          key={tool.id} 
+                          className="bg-white rounded-lg border border-gray-100 p-2.5 shadow-sm hover:shadow-md transition-all group flex flex-col h-full"
+                        >
+                          <div className="flex justify-between items-start mb-1.5">
+                            <div className="flex flex-col gap-0.5">
+                              <div className="px-1.5 py-0.5 bg-gray-100 text-gray-500 text-[8px] uppercase font-bold rounded self-start">
+                                {tool.category}
+                              </div>
+                              {selectedSiteId === 'all' && (
+                                <div className="flex items-center gap-1 text-[9px] text-blue-600 font-bold">
+                                  <MapPin className="w-2.5 h-2.5" />
+                                  {sites.find(s => s.id === tool.currentSiteId)?.name || '알 수 없음'}
+                                </div>
+                              )}
+                            </div>
+                            <StatusBadge status={tool.status} />
                           </div>
-                          {selectedSiteId === 'all' && (
-                            <div className="flex items-center gap-1 text-[9px] text-blue-600 font-bold">
-                              <MapPin className="w-2.5 h-2.5" />
-                              {sites.find(s => s.id === tool.currentSiteId)?.name || '알 수 없음'}
+                          
+                          {tool.imageUrl && (
+                            <div 
+                              className="w-full h-28 mb-2 rounded border border-gray-50 bg-gray-50 flex items-center justify-center p-1 cursor-zoom-in"
+                              onClick={() => setZoomedImage(tool.imageUrl!)}
+                            >
+                              <img src={tool.imageUrl} alt={tool.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                             </div>
                           )}
+                          
+                          <h3 className="text-sm font-bold text-gray-800 mb-0 group-hover:text-blue-600 transition-colors line-clamp-1">{tool.name}</h3>
+                          <p className="font-mono text-[8px] text-gray-400 mb-2 uppercase tracking-tight">{tool.serialNumber}</p>
+                          
+                          <div className="grid grid-cols-2 gap-1.5 mb-2">
+                            <div className="bg-gray-50/50 p-1.5 rounded-md border border-gray-100/50 flex justify-between items-center">
+                              <div className="text-[8px] text-gray-400 font-bold">단위</div>
+                              <div className="text-[10px] font-bold text-gray-700">{tool.unit}</div>
+                            </div>
+                            <div className="bg-blue-50/30 p-1.5 rounded-md border border-blue-100/30 flex justify-between items-center">
+                              <div className="text-[8px] text-blue-400 font-bold">수량</div>
+                              <div className="text-[10px] font-bold text-blue-700">{tool.quantity}</div>
+                            </div>
+                          </div>
+                          
+                          {(() => {
+                            const lastTransfer = [...history].reverse().find(h => h.toolId === tool.id && h.toSiteId === tool.currentSiteId);
+                            const fromSiteName = lastTransfer ? (sites.find(s => s.id === lastTransfer.fromSiteId)?.name || '외부 도입') : '최초 등록';
+                            return (
+                              <div className="flex flex-col gap-1.5 mb-3 px-1">
+                                {userRole === 'admin' && tool.notes && (
+                                  <div className="bg-amber-50 p-2 rounded border border-amber-100 mb-1">
+                                    <div className="text-[8px] text-amber-600 font-bold uppercase mb-0.5 opacity-70">관리자 비고</div>
+                                    <p className="text-[10px] text-amber-900 font-medium leading-tight">{tool.notes}</p>
+                                  </div>
+                                )}
+                                <div className="flex items-center gap-1.5">
+                                  <ArrowDownLeft className="w-3 h-3 text-emerald-500 shrink-0" />
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[9px] font-bold text-gray-400">
+                                      {new Date(tool.lastUpdated).toLocaleDateString()}
+                                    </span>
+                                    <span className="text-[9px] text-blue-500 font-bold">
+                                      발송: {fromSiteName}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                          
+                          <div className="mt-auto flex flex-col gap-2 pt-2 border-t border-gray-50">
+                            <div className="flex justify-between gap-1.5">
+                              <button 
+                                onClick={() => {
+                                  setActiveTool(tool);
+                                  setPreviewImage(tool.imageUrl || null);
+                                  setIsEditToolModalOpen(true);
+                                }}
+                                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-gray-50 rounded-lg text-[10px] font-bold text-gray-600 hover:bg-gray-100 transition-colors"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                                수정
+                              </button>
+
+                              <button 
+                                onClick={() => {
+                                  setActiveTool(tool);
+                                  setIsTransferModalOpen(true);
+                                }}
+                                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-blue-50 rounded-lg text-[10px] font-bold text-blue-600 hover:bg-blue-100 transition-colors group/btn"
+                              >
+                                <ArrowLeftRight className="w-3 h-3 group-hover/btn:rotate-180 transition-transform duration-300" />
+                                이동
+                              </button>
+
+                              <button 
+                                onClick={() => handleDeleteTool(tool.id)}
+                                className="w-8 h-7 flex items-center justify-center bg-red-50 rounded-lg text-red-500 hover:bg-red-100 transition-colors shrink-0"
+                                title="삭제"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
                         </div>
-                        <StatusBadge status={tool.status} />
-                      </div>
-                      
-                      {tool.imageUrl && (
-                        <div 
-                          className="w-full h-28 mb-2 rounded border border-gray-50 bg-gray-50 flex items-center justify-center p-1 cursor-zoom-in"
-                          onClick={() => setZoomedImage(tool.imageUrl!)}
-                        >
-                          <img src={tool.imageUrl} alt={tool.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
-                        </div>
-                      )}
-                      
-                      <h3 className="text-sm font-bold text-gray-800 mb-0 group-hover:text-blue-600 transition-colors line-clamp-1">{tool.name}</h3>
-                      <p className="font-mono text-[8px] text-gray-400 mb-2 uppercase tracking-tight">{tool.serialNumber}</p>
-                      
-                      <div className="grid grid-cols-2 gap-1.5 mb-2">
-                        <div className="bg-gray-50/50 p-1.5 rounded-md border border-gray-100/50 flex justify-between items-center">
-                          <div className="text-[8px] text-gray-400 font-bold">단위</div>
-                          <div className="text-[10px] font-bold text-gray-700">{tool.unit}</div>
-                        </div>
-                        <div className="bg-blue-50/30 p-1.5 rounded-md border border-blue-100/30 flex justify-between items-center">
-                          <div className="text-[8px] text-blue-400 font-bold">수량</div>
-                          <div className="text-[10px] font-bold text-blue-700">{tool.quantity}</div>
-                        </div>
-                      </div>
-                      
-                      {(() => {
-                        const lastTransfer = [...history].reverse().find(h => h.toolId === tool.id && h.toSiteId === tool.currentSiteId);
-                        const fromSiteName = lastTransfer ? (sites.find(s => s.id === lastTransfer.fromSiteId)?.name || '외부 도입') : '최초 등록';
+                      ))}
+                    </div>
+                  )}
+
+                  {/* View Mode 2: By Category */}
+                  {inventoryViewMode === 'by_category' && (
+                    <div className="space-y-6">
+                      {Object.keys(toolsByCategory).sort().map(cat => {
+                        const catTools = toolsByCategory[cat];
+                        const totalCatQty = catTools.reduce((acc, curr) => acc + (curr.quantity || 1), 0);
                         return (
-                          <div className="flex flex-col gap-1.5 mb-3 px-1">
-                            {userRole === 'admin' && tool.notes && (
-                              <div className="bg-amber-50 p-2 rounded border border-amber-100 mb-1">
-                                <div className="text-[8px] text-amber-600 font-bold uppercase mb-0.5 opacity-70">관리자 비고</div>
-                                <p className="text-[10px] text-amber-900 font-medium leading-tight">{tool.notes}</p>
-                              </div>
-                            )}
-                            <div className="flex items-center gap-1.5">
-                              <ArrowDownLeft className="w-3 h-3 text-emerald-500 shrink-0" />
+                          <div key={cat} className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+                            <div className="p-4 bg-gray-50/80 border-b border-gray-200 flex items-center justify-between">
                               <div className="flex items-center gap-2">
-                                <span className="text-[9px] font-bold text-gray-400">
-                                  {new Date(tool.lastUpdated).toLocaleDateString()}
-                                </span>
-                                <span className="text-[9px] text-blue-500 font-bold">
-                                  발송: {fromSiteName}
+                                <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+                                <h3 className="font-bold text-sm text-gray-800">{cat}</h3>
+                                <span className="bg-blue-100 text-blue-700 text-[10px] px-2 py-0.5 rounded-full font-bold">
+                                  {catTools.length}개 품목 ({totalCatQty}개 자산)
                                 </span>
                               </div>
+                              <button 
+                                onClick={() => {
+                                  setSelectedCategoryFilter(cat);
+                                  setInventoryViewMode('cards');
+                                }}
+                                className="text-xs text-blue-600 hover:underline font-bold"
+                              >
+                                이 카테고리만 보기 →
+                              </button>
+                            </div>
+
+                            <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                              {catTools.map(tool => (
+                                <div key={tool.id} className="bg-gray-50/50 rounded-xl border border-gray-100 p-3 hover:bg-white hover:border-gray-200 hover:shadow-sm transition-all flex flex-col justify-between">
+                                  <div>
+                                    <div className="flex justify-between items-start mb-1">
+                                      <h4 className="font-bold text-xs text-gray-800 line-clamp-1">{tool.name}</h4>
+                                      <StatusBadge status={tool.status} />
+                                    </div>
+                                    <p className="font-mono text-[9px] text-gray-400 mb-2">{tool.serialNumber}</p>
+                                    <div className="flex items-center justify-between text-[11px] font-bold text-gray-600 bg-white p-2 rounded-lg border border-gray-100 mb-2">
+                                      <span>수량: {tool.quantity}{tool.unit}</span>
+                                      <span className="text-blue-600 text-[10px]">
+                                        {sites.find(s => s.id === tool.currentSiteId)?.name || '현장 미지정'}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex justify-end gap-1 pt-2 border-t border-gray-100">
+                                    <button 
+                                      onClick={() => { setActiveTool(tool); setIsEditToolModalOpen(true); }}
+                                      className="px-2 py-1 bg-white border border-gray-200 text-gray-700 rounded text-[10px] font-bold hover:bg-gray-100"
+                                    >
+                                      수정
+                                    </button>
+                                    <button 
+                                      onClick={() => { setActiveTool(tool); setIsTransferModalOpen(true); }}
+                                      className="px-2 py-1 bg-blue-600 text-white rounded text-[10px] font-bold hover:bg-blue-700"
+                                    >
+                                      이동
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
                           </div>
                         );
-                      })()}
-                      
-                      <div className="mt-auto flex flex-col gap-2 pt-2 border-t border-gray-50">
-                        <div className="flex justify-between gap-1.5">
-                          <button 
-                            onClick={() => {
-                              setActiveTool(tool);
-                              setPreviewImage(tool.imageUrl || null);
-                              setIsEditToolModalOpen(true);
-                            }}
-                            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-gray-50 rounded-lg text-[10px] font-bold text-gray-600 hover:bg-gray-100 transition-colors"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                            수정
-                          </button>
-                          
-                          <button 
-                            onClick={() => {
-                              setActiveTool(tool);
-                              setIsTransferModalOpen(true);
-                            }}
-                            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-blue-50 rounded-lg text-[10px] font-bold text-blue-600 hover:bg-blue-100 transition-colors group/btn"
-                          >
-                            <ArrowLeftRight className="w-3 h-3 group-hover/btn:rotate-180 transition-transform duration-300" />
-                            이동
-                          </button>
-
-                          <button 
-                            onClick={() => handleDeleteTool(tool.id)}
-                            className="w-8 h-7 flex items-center justify-center bg-red-50 rounded-lg text-red-500 hover:bg-red-100 transition-colors shrink-0"
-                            title="삭제"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
+                      })}
                     </div>
-                  ))}
+                  )}
+
+                  {/* View Mode 3: By Tool Name */}
+                  {inventoryViewMode === 'by_tool_name' && (
+                    <div className="space-y-4">
+                      {Object.keys(toolsByNameGrouped).sort().map(toolName => {
+                        const group = toolsByNameGrouped[toolName];
+                        return (
+                          <div key={toolName} className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden p-5">
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-gray-100 pb-4 mb-4">
+                              <div>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-xs bg-gray-100 text-gray-600 font-bold px-2 py-0.5 rounded">
+                                    {group.category}
+                                  </span>
+                                  <h3 className="text-base font-bold text-gray-900">{toolName}</h3>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-gray-500">
+                                  <span>총 보유 수량: <strong className="text-blue-600">{group.totalQty}개</strong></span>
+                                  <span>•</span>
+                                  <span className="text-emerald-600">가동 가능: {group.availableQty}개</span>
+                                  {group.damagedQty > 0 && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="text-orange-500">점검 필요: {group.damagedQty}개</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Site Distribution Badges */}
+                              <div className="flex flex-wrap gap-1.5">
+                                {Object.keys(group.sitesMap).map(siteName => (
+                                  <span key={siteName} className="bg-blue-50 text-blue-700 border border-blue-100 text-[10px] px-2.5 py-1 rounded-lg font-bold">
+                                    {siteName}: {group.sitesMap[siteName]}개
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* List of tools under this name */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                              {group.tools.map(tool => (
+                                <div key={tool.id} className="p-3 bg-gray-50 rounded-xl border border-gray-100 flex items-center justify-between gap-3">
+                                  <div>
+                                    <div className="flex items-center gap-2 mb-0.5">
+                                      <span className="font-mono text-xs font-bold text-gray-800">{tool.serialNumber}</span>
+                                      <StatusBadge status={tool.status} />
+                                    </div>
+                                    <div className="text-[10px] font-bold text-gray-500">
+                                      {sites.find(s => s.id === tool.currentSiteId)?.name} ({tool.quantity}{tool.unit})
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <button 
+                                      onClick={() => { setActiveTool(tool); setIsEditToolModalOpen(true); }}
+                                      className="p-1.5 bg-white border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-100 text-xs"
+                                      title="수정"
+                                    >
+                                      <Edit2 className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button 
+                                      onClick={() => { setActiveTool(tool); setIsTransferModalOpen(true); }}
+                                      className="p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-xs"
+                                      title="이동"
+                                    >
+                                      <ArrowLeftRight className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {siteTools.length === 0 && (
-                    <div className="col-span-full py-24 flex flex-col items-center justify-center bg-white rounded-2xl border-2 border-dashed border-gray-200 text-gray-400">
+                    <div className="py-24 flex flex-col items-center justify-center bg-white rounded-2xl border-2 border-dashed border-gray-200 text-gray-400">
                       <Box className="w-12 h-12 mb-4 opacity-20" />
-                      <p className="text-sm font-medium">이 현장에 등록된 공구가 없습니다.</p>
-                      <button onClick={() => setIsAddModalOpen(true)} className="mt-4 text-blue-600 text-xs font-bold hover:underline">새 공구 등록하기</button>
+                      <p className="text-sm font-medium">검색 또는 선택한 조건에 해당하는 공구가 없습니다.</p>
+                      <button 
+                        onClick={() => {
+                          setSelectedCategoryFilter('all');
+                          setSelectedToolNameFilter('all');
+                          setSearchQuery('');
+                        }} 
+                        className="mt-4 text-blue-600 text-xs font-bold hover:underline"
+                      >
+                        필터 초기화하기
+                      </button>
                     </div>
                   )}
                 </motion.div>
@@ -1909,7 +2334,7 @@ export default function App() {
                     className="w-full bg-white border border-gray-200 rounded-xl p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                   >
                     <option value="">카테고리 선택...</option>
-                    {CATEGORIES.map(cat => (
+                    {categories.map(cat => (
                       <option key={cat} value={cat}>{cat}</option>
                     ))}
                   </select>
@@ -2175,7 +2600,7 @@ export default function App() {
                   className="w-full bg-white border border-gray-200 rounded-xl p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                 >
                   <option value="">카테고리 선택...</option>
-                  {CATEGORIES.map(cat => (
+                  {categories.map(cat => (
                     <option key={cat} value={cat}>{cat}</option>
                   ))}
                 </select>
@@ -2840,6 +3265,136 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </motion.div>
+        </div>
+      )}
+      {/* Category Management Modal */}
+      {isCategoryManageModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+          >
+            <div className="p-5 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+              <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+                <Settings2 className="w-5 h-5 text-blue-600" />
+                장비 카테고리 관리
+              </h3>
+              <button onClick={() => { setIsCategoryManageModalOpen(false); setEditingCategory(null); }} className="text-gray-400 hover:text-gray-600 transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-5 max-h-[80vh] overflow-y-auto">
+              {/* Add New Category */}
+              <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100">
+                <label className="block text-xs font-bold text-blue-900 mb-2">새 카테고리 추가</label>
+                <form 
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const formData = new FormData(e.currentTarget);
+                    const name = formData.get('catName') as string;
+                    if (name) {
+                      handleAddCategory(name);
+                      e.currentTarget.reset();
+                    }
+                  }}
+                  className="flex gap-2"
+                >
+                  <input 
+                    name="catName"
+                    type="text"
+                    required
+                    placeholder="예: 용접장비, 안전용품"
+                    className="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                  <button 
+                    type="submit"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition-all flex items-center gap-1 shrink-0"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    추가
+                  </button>
+                </form>
+              </div>
+
+              {/* Existing Categories List */}
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-xs font-bold text-gray-700">등록된 카테고리 목록 ({categories.length})</span>
+                  <span className="text-[10px] text-gray-400">수정/삭제 시 자산 정보가 연동됩니다</span>
+                </div>
+
+                <div className="space-y-2">
+                  {categories.map((cat) => {
+                    const count = tools.filter(t => t.category === cat).length;
+                    const isEditing = editingCategory?.oldName === cat;
+
+                    return (
+                      <div key={cat} className="p-3 bg-gray-50 rounded-xl border border-gray-100 flex items-center justify-between gap-2">
+                        {isEditing ? (
+                          <div className="flex items-center gap-2 flex-1">
+                            <input 
+                              type="text"
+                              value={editingCategory.newName}
+                              onChange={(e) => setEditingCategory({ ...editingCategory, newName: e.target.value })}
+                              className="flex-1 bg-white border border-blue-400 rounded-lg px-2.5 py-1 text-xs font-bold focus:outline-none"
+                            />
+                            <button 
+                              onClick={() => handleEditCategory(editingCategory.oldName, editingCategory.newName)}
+                              className="px-2.5 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700"
+                            >
+                              저장
+                            </button>
+                            <button 
+                              onClick={() => setEditingCategory(null)}
+                              className="px-2.5 py-1 bg-gray-200 text-gray-600 rounded-lg text-xs font-bold hover:bg-gray-300"
+                            >
+                              취소
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-gray-800">{cat}</span>
+                              <span className="text-[10px] bg-white border border-gray-200 px-2 py-0.5 rounded-full font-bold text-gray-500">
+                                {count}개 보유
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button 
+                                onClick={() => setEditingCategory({ oldName: cat, newName: cat })}
+                                className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-white rounded-lg transition-colors"
+                                title="카테고리 수정"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button 
+                                onClick={() => handleDeleteCategory(cat)}
+                                className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-white rounded-lg transition-colors"
+                                title="카테고리 삭제"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end">
+              <button 
+                onClick={() => { setIsCategoryManageModalOpen(false); setEditingCategory(null); }}
+                className="px-5 py-2.5 bg-slate-900 text-white text-xs font-bold rounded-xl hover:bg-slate-800 transition-colors"
+              >
+                닫기
+              </button>
+            </div>
           </motion.div>
         </div>
       )}
