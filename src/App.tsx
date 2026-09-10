@@ -43,12 +43,15 @@ import {
   Share2,
   Copy,
   QrCode,
-  ExternalLink
+  ExternalLink,
+  ArrowUpDown,
+  FileText
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Site, Tool, TransferHistory, ToolStatus, Notice, ApprovalRequest } from './types';
 import { SITES as INITIAL_SITES, APP_VERSION, CATEGORIES, INITIAL_TOOLS } from './constants';
+import { ExecutiveReportModal } from './components/ExecutiveReportModal';
 
 // Firebase Imports
 import { initializeApp } from 'firebase/app';
@@ -106,6 +109,7 @@ export default function App() {
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [selectedToolNameFilter, setSelectedToolNameFilter] = useState<string>('all');
   const [inventoryViewMode, setInventoryViewMode] = useState<'cards' | 'by_category' | 'by_tool_name'>('cards');
+  const [inventorySortBy, setInventorySortBy] = useState<'recent' | 'name' | 'quantity'>('recent');
   
   const [selectedSiteId, setSelectedSiteId] = useState<string>(() => {
     if (typeof window === 'undefined') return 'all';
@@ -322,6 +326,7 @@ export default function App() {
   const [isDeleteRequestModalOpen, setIsDeleteRequestModalOpen] = useState(false);
   const [isAddNoticeModalOpen, setIsAddNoticeModalOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isExecutiveReportModalOpen, setIsExecutiveReportModalOpen] = useState(false);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   
   const [activeTool, setActiveTool] = useState<Tool | null>(null);
@@ -422,16 +427,29 @@ export default function App() {
     }
   };
 
-  // Filtered tools for the current site, category, and tool name
+  // Filtered tools for the current site, category, and tool name, sorted by inventorySortBy
   const siteTools = useMemo(() => {
-    return tools.filter(tool => {
+    const filtered = tools.filter(tool => {
       const matchesSearch = (tool.name.toLowerCase().includes(searchQuery.toLowerCase()) || tool.serialNumber.toLowerCase().includes(searchQuery.toLowerCase()));
       const matchesSite = selectedSiteId === 'all' || tool.currentSiteId === selectedSiteId;
       const matchesCategory = selectedCategoryFilter === 'all' || tool.category === selectedCategoryFilter;
       const matchesToolName = selectedToolNameFilter === 'all' || tool.name === selectedToolNameFilter;
       return matchesSearch && matchesSite && matchesCategory && matchesToolName;
     });
-  }, [tools, selectedSiteId, searchQuery, selectedCategoryFilter, selectedToolNameFilter]);
+
+    return [...filtered].sort((a, b) => {
+      if (inventorySortBy === 'name') {
+        return a.name.localeCompare(b.name, 'ko');
+      } else if (inventorySortBy === 'quantity') {
+        return (b.quantity || 1) - (a.quantity || 1);
+      } else {
+        // 'recent'
+        const dateA = new Date(a.lastUpdated || 0).getTime();
+        const dateB = new Date(b.lastUpdated || 0).getTime();
+        return dateB - dateA;
+      }
+    });
+  }, [tools, selectedSiteId, searchQuery, selectedCategoryFilter, selectedToolNameFilter, inventorySortBy]);
 
   // Distinct tool names present in dataset
   const availableToolNames = useMemo(() => {
@@ -1384,6 +1402,18 @@ export default function App() {
             </div>
             
             <button 
+              onClick={() => setIsExecutiveReportModalOpen(true)}
+              className="w-full flex items-center justify-between p-2.5 bg-gradient-to-r from-indigo-950/70 to-slate-900/90 hover:from-indigo-900/70 hover:to-slate-800 rounded-xl transition-all border border-indigo-700/40 text-xs font-bold text-indigo-100 shadow-sm"
+              title="대표이사 보고용 공구 자산 리포트 생성"
+            >
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-indigo-400" />
+                <span>대표이사 보고서 생성</span>
+              </div>
+              <span className="text-[10px] bg-indigo-500/30 text-indigo-200 border border-indigo-400/20 px-2 py-0.5 rounded-full font-mono font-bold">CEO</span>
+            </button>
+
+            <button 
               onClick={() => setIsCategoryManageModalOpen(true)}
               className="w-full flex items-center justify-between p-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl transition-all border border-slate-700 text-xs font-bold text-slate-200"
             >
@@ -1447,6 +1477,15 @@ export default function App() {
             </div>
 
             <div className="flex gap-2 lg:gap-3">
+              <button 
+                onClick={() => setIsExecutiveReportModalOpen(true)}
+                className="p-2 lg:px-3.5 lg:py-2 bg-gradient-to-r from-indigo-600 to-blue-700 text-white rounded-lg text-sm font-bold shadow-sm hover:from-indigo-700 hover:to-blue-800 transition-all flex items-center gap-1.5"
+                title="대표이사 보고서 생성"
+              >
+                <FileText className="w-4 h-4" />
+                <span className="hidden sm:inline">대표이사 보고서</span>
+              </button>
+
               {(userRole === 'admin' || userRole === 'manager') && (
                 <button 
                   onClick={() => setIsAddModalOpen(true)}
@@ -1583,6 +1622,21 @@ export default function App() {
                     <option key={name} value={name}>{name}</option>
                   ))}
                 </select>
+
+                {/* Sort Dropdown */}
+                <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs">
+                  <ArrowUpDown className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+                  <span className="text-[11px] font-bold text-gray-500 hidden xl:inline">정렬:</span>
+                  <select 
+                    value={inventorySortBy}
+                    onChange={(e) => setInventorySortBy(e.target.value as any)}
+                    className="bg-transparent text-xs font-bold text-gray-700 focus:outline-none cursor-pointer"
+                  >
+                    <option value="recent">최근 업데이트순</option>
+                    <option value="name">이름순 (가나다)</option>
+                    <option value="quantity">수량순 (많은순)</option>
+                  </select>
+                </div>
 
                 {/* Reset Filters */}
                 {(selectedCategoryFilter !== 'all' || selectedToolNameFilter !== 'all' || searchQuery) && (
@@ -3398,6 +3452,17 @@ export default function App() {
           </motion.div>
         </div>
       )}
+
+      {/* Executive Report Modal */}
+      <ExecutiveReportModal
+        isOpen={isExecutiveReportModalOpen}
+        onClose={() => setIsExecutiveReportModalOpen(false)}
+        tools={tools}
+        sites={sites}
+        categories={categories}
+        currentSiteId={selectedSiteId}
+        userRole={userRole}
+      />
     </div>
   );
 }
