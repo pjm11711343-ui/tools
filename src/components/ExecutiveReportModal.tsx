@@ -58,11 +58,49 @@ export function ExecutiveReportModal({
   const [reportTitle, setReportTitle] = useState(
     '【대표이사 보고용】 전사 공구·장비 자산 보유 및 가동 현황 종합 보고서'
   );
-  const [reporterName, setReporterName] = useState(
-    userRole === 'admin' ? '홍길동 총괄관리자' : '현장 자산관리담당자'
-  );
-  const [reporterDept, setReporterDept] = useState('경영지원본부 / 자산관리팀');
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [reporterName, setReporterName] = useState('박정민 이사');
+  const [reporterDept, setReporterDept] = useState('자재부');
+
+  // Unique list of all available categories
+  const allCategories = useMemo(() => {
+    const set = new Set<string>(categories);
+    tools.forEach(t => {
+      if (t.category) set.add(t.category);
+    });
+    return Array.from(set).filter(Boolean);
+  }, [categories, tools]);
+
+  // Selected categories list (defaults to all categories, can be individually toggled)
+  const [selectedCategories, setSelectedCategories] = useState<string[]>(() => {
+    const set = new Set<string>(categories);
+    tools.forEach(t => {
+      if (t.category) set.add(t.category);
+    });
+    return Array.from(set).filter(Boolean);
+  });
+
+  const toggleCategory = (cat: string) => {
+    setSelectedCategories(prev =>
+      prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
+    );
+  };
+
+  const selectAllCategories = () => {
+    setSelectedCategories([...allCategories]);
+  };
+
+  const deselectAllCategories = () => {
+    setSelectedCategories([]);
+  };
+
+  const selectedCategorySummary = useMemo(() => {
+    if (selectedCategories.length === 0) return '선택된 카테고리 없음 (0개)';
+    if (selectedCategories.length === allCategories.length) {
+      return `전체 카테고리 (${allCategories.length}개 분야 전체)`;
+    }
+    return `${selectedCategories.join(', ')} (총 ${selectedCategories.length}개 선택)`;
+  }, [selectedCategories, allCategories]);
+
   const [sortBy, setSortBy] = useState<'name' | 'quantity' | 'recent' | 'category'>('category');
   const [includeDisposed, setIncludeDisposed] = useState<boolean>(false);
   const [isCopied, setIsCopied] = useState<boolean>(false);
@@ -73,15 +111,16 @@ export function ExecutiveReportModal({
     '3. 현장 간 빈번한 자산 이동에 따른 분실 및 훼손을 사전 예방하기 위해 반출·반입 전자인계 시스템 및 정기 재물조사를 철저히 이행하겠습니다.'
   );
 
-  // Filter tools for the report
+  // Filter tools for the report (only selected categories)
   const filteredTools = useMemo(() => {
     return tools.filter(t => {
       const matchSite = selectedReportSiteId === 'all' || t.currentSiteId === selectedReportSiteId;
-      const matchCat = selectedCategory === 'all' || t.category === selectedCategory;
+      const cat = t.category || '기타';
+      const matchCat = selectedCategories.includes(cat);
       const matchDisposed = includeDisposed ? true : t.status !== 'disposed';
       return matchSite && matchCat && matchDisposed;
     });
-  }, [tools, selectedReportSiteId, selectedCategory, includeDisposed]);
+  }, [tools, selectedReportSiteId, selectedCategories, includeDisposed]);
 
   // Sort tools
   const sortedReportTools = useMemo(() => {
@@ -191,6 +230,8 @@ export function ExecutiveReportModal({
 보고부서: ${reporterDept}
 보 고 자: ${reporterName}
 보고대상: ${targetSiteName}
+보고범위: ${selectedCategorySummary}
+결재라인: 담당 → 팀장 → 임원 → 대표이사
 
 --------------------------------------------------
 ■ 핵심 지표 요약 (Executive KPI)
@@ -222,8 +263,10 @@ ${executiveNotes}
     let csv = '\ufeff';
     csv += `대표이사 보고용 공구 자산 현황 보고서\n`;
     csv += `문서번호,${defaultDocNo},보고일자,${todayStr}\n`;
-    csv += `보고부서,${reporterDept},보고자,${reporterName}\n`;
-    csv += `보고대상,${targetSiteName},총수량,${totalQuantity}개,가동률,${operatingRate}%\n\n`;
+    csv += `기안부서,${reporterDept},기안자,${reporterName}\n`;
+    csv += `결재라인,담당,팀장,임원,대표이사\n`;
+    csv += `보고대상,${targetSiteName},보고카테고리,"${selectedCategorySummary}"\n`;
+    csv += `총수량,${totalQuantity}개,가동률,${operatingRate}%\n\n`;
 
     csv += `[1. 카테고리별 요약]\n`;
     csv += `카테고리,품목수,총보유수량,정상가동,점검수리요망,이동중,가동률\n`;
@@ -430,8 +473,8 @@ ${executiveNotes}
                   <tr>
                     <th rowspan="2" style="width: 20px; background: #e2e8f0; font-size: 10px; padding: 2px;">결<br>재</th>
                     <th>담당</th>
-                    <th>검토</th>
-                    <th>총괄</th>
+                    <th>팀장</th>
+                    <th>임원</th>
                     <th style="color: #1e40af;">대표이사</th>
                   </tr>
                   <tr>
@@ -455,6 +498,7 @@ ${executiveNotes}
             <div><strong>기 안 자:</strong> ${reporterName}</div>
             <div><strong>보고 대상 현장:</strong> ${targetSiteName}</div>
             <div><strong>실사 기준일:</strong> ${todayStr} 현재</div>
+            <div style="grid-column: span 2;"><strong>보고 카테고리:</strong> ${selectedCategorySummary}</div>
           </div>
 
           <div class="kpi-cards">
@@ -640,22 +684,6 @@ ${executiveNotes}
               </select>
             </div>
 
-            {/* Category Filter */}
-            <div className="flex items-center gap-1.5">
-              <Layers className="w-3.5 h-3.5 text-slate-500" />
-              <span className="font-bold text-slate-600 text-[11px]">카테고리:</span>
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-              >
-                <option value="all">전체 카테고리</option>
-                {categories.map(c => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
-
             {/* Sort Dropdown */}
             <div className="flex items-center gap-1.5">
               <span className="font-bold text-slate-600 text-[11px]">정렬:</span>
@@ -690,6 +718,86 @@ ${executiveNotes}
           </div>
         </div>
 
+        {/* Category Multi-Selection Bar */}
+        <div className="px-4 py-2.5 bg-slate-100/90 border-b border-slate-200 text-xs shrink-0">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2">
+              <Layers className="w-4 h-4 text-blue-600 shrink-0" />
+              <span className="font-bold text-slate-800 text-xs">보고 대상 카테고리 선택:</span>
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+                selectedCategories.length === 0
+                  ? 'bg-amber-100 text-amber-800 border-amber-300'
+                  : selectedCategories.length === allCategories.length
+                    ? 'bg-blue-100 text-blue-800 border-blue-200'
+                    : 'bg-emerald-100 text-emerald-800 border-emerald-200'
+              }`}>
+                {selectedCategories.length === 0
+                  ? '선택 없음 (0개)'
+                  : selectedCategories.length === allCategories.length
+                    ? `전체 선택됨 (${allCategories.length}개)`
+                    : `${selectedCategories.length} / ${allCategories.length}개 선택됨`}
+              </span>
+              <span className="text-[11px] text-slate-500 hidden sm:inline">
+                (원하는 카테고리를 클릭하여 선택한 항목만 보고서에 포함됩니다)
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={selectAllCategories}
+                className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors shadow-xs"
+              >
+                전체 선택
+              </button>
+              <button
+                type="button"
+                onClick={deselectAllCategories}
+                className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors shadow-xs"
+              >
+                선택 해제
+              </button>
+            </div>
+          </div>
+
+          {/* Category Pills/Chips */}
+          <div className="flex flex-wrap gap-1.5">
+            {allCategories.map(cat => {
+              const isSelected = selectedCategories.includes(cat);
+              const toolCount = tools.filter(t => 
+                (t.category || '기타') === cat && 
+                (selectedReportSiteId === 'all' || t.currentSiteId === selectedReportSiteId) &&
+                (includeDisposed ? true : t.status !== 'disposed')
+              ).length;
+
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => toggleCategory(cat)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all border select-none ${
+                    isSelected
+                      ? 'bg-blue-600 text-white border-blue-700 shadow-xs ring-1 ring-blue-400/30'
+                      : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50 hover:border-slate-400'
+                  }`}
+                  title={`${cat} (품목 ${toolCount}개) - 클릭하여 ${isSelected ? '해제' : '선택'}`}
+                >
+                  <span className={`w-3.5 h-3.5 rounded flex items-center justify-center text-[10px] font-bold ${
+                    isSelected ? 'bg-white/25 text-white' : 'border border-slate-400 text-transparent'
+                  }`}>
+                    ✓
+                  </span>
+                  <span>{cat}</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                    isSelected ? 'bg-blue-700 text-blue-100' : 'bg-slate-100 text-slate-500'
+                  }`}>
+                    {toolCount}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Report Document Body Preview */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-8 bg-slate-100/60">
           {/* Formal Paper Container */}
@@ -714,8 +822,8 @@ ${executiveNotes}
                         결<br />재
                       </th>
                       <th className="w-16 py-1 px-2 border border-slate-700 font-bold text-[11px]">담당</th>
-                      <th className="w-16 py-1 px-2 border border-slate-700 font-bold text-[11px]">검토</th>
-                      <th className="w-16 py-1 px-2 border border-slate-700 font-bold text-[11px]">총괄</th>
+                      <th className="w-16 py-1 px-2 border border-slate-700 font-bold text-[11px]">팀장</th>
+                      <th className="w-16 py-1 px-2 border border-slate-700 font-bold text-[11px]">임원</th>
                       <th className="w-18 py-1 px-2 border border-slate-700 font-bold text-[11px] text-blue-700 bg-blue-50/50">
                         대표이사
                       </th>
@@ -768,6 +876,15 @@ ${executiveNotes}
                   className="bg-white border border-slate-300 rounded px-2 py-0.5 text-xs font-bold text-slate-800 flex-1 focus:outline-none"
                 />
               </div>
+              <div className="flex items-center gap-2 sm:col-span-2">
+                <span className="text-slate-500 font-bold w-16 shrink-0">보고범위:</span>
+                <div className="flex-1 bg-white border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-800 font-semibold truncate flex items-center justify-between gap-2">
+                  <span className="truncate">{selectedCategorySummary}</span>
+                  <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.2 rounded font-mono shrink-0">
+                    {selectedCategories.length}/{allCategories.length} 선택
+                  </span>
+                </div>
+              </div>
             </div>
 
             {/* Executive KPIs */}
@@ -819,21 +936,29 @@ ${executiveNotes}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {categoryStats.map(([cat, stat]) => {
-                      const rate = stat.totalQty > 0 ? ((stat.available / stat.totalQty) * 100).toFixed(1) : '0';
-                      return (
-                        <tr key={cat} className="hover:bg-slate-50/80">
-                          <td className="p-2.5 font-bold text-slate-800">{cat}</td>
-                          <td className="p-2.5 text-right text-slate-600">{stat.models}개</td>
-                          <td className="p-2.5 text-right font-bold text-slate-900">{stat.totalQty}개</td>
-                          <td className="p-2.5 text-right font-bold text-emerald-600">{stat.available}개</td>
-                          <td className={`p-2.5 text-right font-bold ${stat.damaged > 0 ? 'text-red-600' : 'text-slate-400'}`}>
-                            {stat.damaged}개
-                          </td>
-                          <td className="p-2.5 text-right font-bold text-blue-600">{rate}%</td>
-                        </tr>
-                      );
-                    })}
+                    {categoryStats.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="p-6 text-center text-slate-400 font-medium">
+                          선택된 카테고리가 없습니다. 상단 '보고 대상 카테고리 선택'에서 카테고리를 선택해 주세요.
+                        </td>
+                      </tr>
+                    ) : (
+                      categoryStats.map(([cat, stat]) => {
+                        const rate = stat.totalQty > 0 ? ((stat.available / stat.totalQty) * 100).toFixed(1) : '0';
+                        return (
+                          <tr key={cat} className="hover:bg-slate-50/80">
+                            <td className="p-2.5 font-bold text-slate-800">{cat}</td>
+                            <td className="p-2.5 text-right text-slate-600">{stat.models}개</td>
+                            <td className="p-2.5 text-right font-bold text-slate-900">{stat.totalQty}개</td>
+                            <td className="p-2.5 text-right font-bold text-emerald-600">{stat.available}개</td>
+                            <td className={`p-2.5 text-right font-bold ${stat.damaged > 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                              {stat.damaged}개
+                            </td>
+                            <td className="p-2.5 text-right font-bold text-blue-600">{rate}%</td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -864,40 +989,49 @@ ${executiveNotes}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-normal">
-                    {sortedReportTools.map((tool, index) => {
-                      const siteName = sites.find(s => s.id === tool.currentSiteId)?.name || '기타';
-                      return (
-                        <tr key={tool.id} className="hover:bg-slate-50/80 text-[11px]">
-                          <td className="p-2 text-center text-slate-400">{index + 1}</td>
-                          <td className="p-2 font-medium text-slate-600">{tool.category}</td>
-                          <td className="p-2 font-bold text-slate-900">{tool.name}</td>
-                          <td className="p-2 font-mono text-slate-500">{tool.serialNumber}</td>
-                          <td className="p-2 text-center text-slate-500">{tool.unit}</td>
-                          <td className="p-2 text-right font-bold text-blue-900">{tool.quantity}</td>
-                          <td className="p-2 text-slate-700">{siteName}</td>
-                          <td className="p-2 text-center">
-                            {tool.status === 'available' && (
-                              <span className="text-emerald-600 font-bold">정상</span>
-                            )}
-                            {tool.status === 'damaged' && (
-                              <span className="text-red-600 font-bold">수리요망</span>
-                            )}
-                            {tool.status === 'in_transit' && (
-                              <span className="text-amber-600 font-bold">이동중</span>
-                            )}
-                            {tool.status === 'lost' && (
-                              <span className="text-slate-400 font-bold">분실</span>
-                            )}
-                            {tool.status === 'disposed' && (
-                              <span className="text-slate-400 font-bold">폐기</span>
-                            )}
-                          </td>
-                          <td className="p-2 text-center text-slate-400">
-                            {tool.lastUpdated ? new Date(tool.lastUpdated).toLocaleDateString() : '-'}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {sortedReportTools.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="p-8 text-center text-slate-400">
+                          <p className="font-bold text-slate-700 text-xs">선택된 카테고리에 해당하는 공구·장비가 없습니다.</p>
+                          <p className="text-[11px] text-slate-400 mt-1">상단에서 보고할 카테고리를 선택해 주세요.</p>
+                        </td>
+                      </tr>
+                    ) : (
+                      sortedReportTools.map((tool, index) => {
+                        const siteName = sites.find(s => s.id === tool.currentSiteId)?.name || '기타';
+                        return (
+                          <tr key={tool.id} className="hover:bg-slate-50/80 text-[11px]">
+                            <td className="p-2 text-center text-slate-400">{index + 1}</td>
+                            <td className="p-2 font-medium text-slate-600">{tool.category}</td>
+                            <td className="p-2 font-bold text-slate-900">{tool.name}</td>
+                            <td className="p-2 font-mono text-slate-500">{tool.serialNumber}</td>
+                            <td className="p-2 text-center text-slate-500">{tool.unit}</td>
+                            <td className="p-2 text-right font-bold text-blue-900">{tool.quantity}</td>
+                            <td className="p-2 text-slate-700">{siteName}</td>
+                            <td className="p-2 text-center">
+                              {tool.status === 'available' && (
+                                <span className="text-emerald-600 font-bold">정상</span>
+                              )}
+                              {tool.status === 'damaged' && (
+                                <span className="text-red-600 font-bold">수리요망</span>
+                              )}
+                              {tool.status === 'in_transit' && (
+                                <span className="text-amber-600 font-bold">이동중</span>
+                              )}
+                              {tool.status === 'lost' && (
+                                <span className="text-slate-400 font-bold">분실</span>
+                              )}
+                              {tool.status === 'disposed' && (
+                                <span className="text-slate-400 font-bold">폐기</span>
+                              )}
+                            </td>
+                            <td className="p-2 text-center text-slate-400">
+                              {tool.lastUpdated ? new Date(tool.lastUpdated).toLocaleDateString() : '-'}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
